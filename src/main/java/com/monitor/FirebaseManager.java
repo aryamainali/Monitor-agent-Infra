@@ -10,6 +10,7 @@ import com.google.cloud.firestore.WriteResult;
 import java.io.FileInputStream;
 import java.util.concurrent.Executors;
 import java.util.Map;
+import java.util.HashMap;
 
 public class FirebaseManager {
 
@@ -18,15 +19,12 @@ public class FirebaseManager {
 
     public static void initializeFirebase() {
         try {
-            // 1. Look for an environment variable first, otherwise fallback to local path safely hidden by .gitignore
             String configPath = System.getenv("FIREBASE_CONFIG_PATH");
             if (configPath == null || configPath.isEmpty()) {
                 configPath = "src/main/resources/serviceAccountKey.json";
             }
 
-            // Secure Service Account Auth token verification
             FileInputStream serviceAccount = new FileInputStream(configPath);
-
             FirebaseOptions options = FirebaseOptions.builder()
                 .setCredentials(GoogleCredentials.fromStream(serviceAccount))
                 .build();
@@ -35,35 +33,60 @@ public class FirebaseManager {
             db = FirestoreClient.getFirestore();
             isInitialized = true;
             System.out.println("[INFO] Authenticated via Service Account. Firestore Connection Live.");
-        } catch (java.io.FileNotFoundException e) {
-            System.err.println("[WARN] Firebase Auth paused. Configuration key file not found safely: " + e.getMessage());
         } catch (Exception e) {
-            System.err.println("[ERROR] Failed to initialize Firebase: " + e.getMessage());
+            System.err.println("[WARN] Firebase Auth paused: " + e.getMessage());
         }
     }
 
-    public static void sendMetricsToFirestore(String serverId, Map<String, Object> metrics) {
+    /**
+     * Overwrites the single active state document for this specific server.
+     * This keeps the dashboard accurate without bloating the database.
+     */
+    public static void updateActiveState(String serverId, Map<String, Object> metrics) {
         if (!isInitialized) {
             System.out.println("[LOCAL-STORE] Firestore offline. Local metrics: " + metrics);
             return;
         }
-        
+
         try {
-            // Store under collection "telemetry_logs" with a sub-document per snapshot update
-            String documentId = serverId + "_" + System.currentTimeMillis();
-            ApiFuture<WriteResult> result = db.collection("telemetry_logs").document(documentId).set(metrics);
+            // .document(serverId) ensures we overwrite the SAME document every 1 minute
+            ApiFuture<WriteResult> result = db.collection("server_states").document(serverId).set(metrics);
             
-            // Asynchronously log verification confirmation 
             result.addListener(() -> {
                 try {
-                    System.out.println("[FIRESTORE-SYNC] Document written successfully at: " + result.get().getUpdateTime());
+                    System.out.println("[FIRESTORE-STATE] Active state refreshed at: " + result.get().getUpdateTime());
                 } catch (Exception e) {
-                    System.err.println("[ERROR] Failed to verify Firestore write: " + e.getMessage());
+                    System.err.println("[ERROR] Failed to update active state: " + e.getMessage());
                 }
             }, Executors.newSingleThreadExecutor());
 
         } catch (Exception e) {
-            System.err.println("[ERROR] Error uploading document metrics to Firestore: " + e.getMessage());
+            System.err.println("[ERROR] Error updating active state: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Pushes a permanent incident log document when a server hits critical usage peaks.
+     */
+    public static void writePeakLog(String serverId, String alertPriority, String resourceType, double peakValue, Map<String, Object> details) {
+        if (!isInitialized) return;
+
+        try {
+            Map<String, Object> logEntry = new HashMap<>();
+            logEntry.put("serverId", serverId);
+            logEntry.put("timestamp", System.currentTimeMillis());
+            logEntry.put("priority", alertPriority); // HIGH, LOW, IGNORABLE
+            logEntry.put("resource", resourceType);   // CPU or MEMORY
+            logEntry.put("peakValuePercent", peakValue);
+            logEntry.put("snapshotMetrics", details);
+            logEntry.put("status", "UNRESOLVED");     // Can be marked "RESOLVED" or deleted via UI
+
+            String logId = serverId + "_PEAK_" + System.currentTimeMillis();
+            db.collection("peak_logs").document(logId).set(logEntry);
+            
+            System.out.println("[ALERT-TRIGGERED] Written " + alertPriority + " priority peak log to Firestore.");
+        } catch (Exception e) {
+            System.err.println("[ERROR] Failed to write peak log: " + e.getMessage());
         }
     }
 }
