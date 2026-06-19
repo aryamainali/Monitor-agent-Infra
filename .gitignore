@@ -1,0 +1,13 @@
+# Target build folder (compiled Java classes)
+target/
+
+# Secret Firebase Configuration Keys (NEVER PUSH THESE)
+src/main/resources/serviceAccountKey.json
+
+# IDE Settings
+.idea/
+.project
+.classpath
+.settings/
+*.iml
+.vscode/
