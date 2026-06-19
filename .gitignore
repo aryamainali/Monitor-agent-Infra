@@ -11,3 +11,4 @@ src/main/resources/serviceAccountKey.json
 .settings/
 *.iml
 .vscode/
+.env
