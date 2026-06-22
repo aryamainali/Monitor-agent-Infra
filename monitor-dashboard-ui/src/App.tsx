@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { db } from './config/Firebase';
+import { db } from './config/firebase';
 import { collection, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import type { ServerState, PeakLog } from './types/telemetry';
 import { ServerCard } from './components/ServerCard';
@@ -191,5 +191,4 @@ function App() {
     </div>
   );
 }
-
 export default App;
